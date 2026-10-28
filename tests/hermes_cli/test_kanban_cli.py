@@ -39,6 +39,11 @@ def kanban_home(tmp_path, monkeypatch):
 # ---------------------------------------------------------------------------
 
 
+def test_run_slash_accepts_portuguese_create_alias(kanban_home):
+    raw = kc.run_slash('crie "tarefa em português" --json')
+    payload = json.loads(raw)
+    assert payload["title"] == "tarefa em português"
+
 
 def test_kanban_list_json_includes_session_id(kanban_home):
     """JSON output exposes `session_id` so external clients (Scarf, web

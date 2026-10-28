@@ -218,7 +218,7 @@ _SPECS = [
                   "that require immediate human ops (R3 gate) "
                   "to skip the brief running-to-blocked transition."),
         _json_flag(help="Emit JSON output"),
-    ], help="Create a new task"),
+    ], aliases=["crie"], help="Create a new task"),
     _cmd("swarm", [
         _arg("goal", help="Swarm goal / final outcome"),
         _arg("--worker", action="append", default=[], metavar="PROFILE:TITLE[:SKILL,SKILL]",
