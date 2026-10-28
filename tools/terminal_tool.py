@@ -857,6 +857,7 @@ from tools.terminal_tool_guards import (
     _foreground_background_guidance, _safe_command_preview, _validate_workdir,
     gateway_lifecycle_block, self_repo_block,
 )
+from tools.kanban_effect_gate import local_only_terminal_block
 from tools.terminal_tool_background import _YIELDED_NOTE, spawn_background_process, yield_to_background_handler
 from tools.terminal_tool_result import finalize_foreground_result
 
@@ -1325,6 +1326,9 @@ def _pre_exec_block(
     )
     if blocked:
         raise _Rejected(blocked)
+    local_only_error = local_only_terminal_block(command)
+    if local_only_error:
+        raise _Rejected(_error_json(local_only_error, status="blocked"))
     if workdir:
         workdir_error = _validate_workdir(workdir)
         if workdir_error:

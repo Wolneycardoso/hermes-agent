@@ -703,6 +703,40 @@ async def test_gateway_natural_mission_autosubscribes(kanban_home):
     assert subs[0]["chat_id"] == "natural-chat"
 
 
+@pytest.mark.asyncio
+async def test_gateway_show_output_cannot_trigger_auto_subscribe(kanban_home):
+    """A title containing a creation-like string is still a read command."""
+    from gateway.slash_commands import GatewaySlashCommandsMixin
+    from gateway.config import Platform
+
+    with kbc.connect() as conn:
+        task_id = kb.create_task(conn, title="Created t_deadbeef from user content")
+
+    runner = object.__new__(GatewaySlashCommandsMixin)
+    runner._kanban_notifier_profile = "default"
+    runner._reply_metadata = lambda _event: None
+    runner._active_profile_name = lambda: "default"
+    source = SimpleNamespace(
+        platform=Platform.DISCORD,
+        chat_id="show-chat",
+        chat_type="dm",
+        thread_id="show-thread",
+        user_id="show-user",
+    )
+    event = SimpleNamespace(
+        text=f"/kanban show {task_id}",
+        source=source,
+        message_id="show-message",
+        reply_to_message_id=None,
+    )
+
+    out = await GatewaySlashCommandsMixin._handle_kanban_command(runner, event)
+
+    assert "subscribed" not in out.lower()
+    with kbc.connect() as conn:
+        assert kbn.list_notify_subs(conn) == []
+
+
 @pytest.mark.parametrize(
     "chat_type,thread_id,thread_sessions_per_user",
     [

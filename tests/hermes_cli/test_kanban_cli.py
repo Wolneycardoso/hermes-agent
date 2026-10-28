@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+from concurrent.futures import ThreadPoolExecutor
 import json
 import threading
 from pathlib import Path
@@ -65,6 +66,25 @@ def test_natural_mission_request_is_idempotent(kanban_home):
     assert first["task"]["id"] == second["task"]["id"]
     assert first["created"] is True
     assert second["created"] is False
+
+
+def test_natural_mission_idempotency_is_atomic_under_concurrency(kanban_home):
+    request = "crie uma missão concorrente para o Kanban"
+    from hermes_cli.kanban_intent import create_mission
+
+    def submit():
+        with kbc.connect() as conn:
+            task, created, _spec = create_mission(
+                conn, request, created_by="user", idempotency_key="concurrent-natural-mission"
+            )
+            return task.id, created
+
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        results = list(pool.map(lambda _index: submit(), range(4)))
+
+    assert len({task_id for task_id, _created in results}) == 1
+    assert sum(created is True for _task_id, created in results) == 1
+    assert sum(created is False for _task_id, created in results) == 3
 
 
 def test_natural_mission_preview_does_not_write(kanban_home):

@@ -2915,6 +2915,13 @@ def _default_spawn(task: Task, workspace: str, *, board: Optional[str] = None) -
         env["HERMES_KANBAN_GOAL_MODE"] = "1"
         if task.goal_max_turns is not None:
             env["HERMES_KANBAN_GOAL_MAX_TURNS"] = str(int(task.goal_max_turns))
+    # Natural-language missions declare a local-only completion contract. Keep
+    # the policy in the worker environment so every tool boundary can enforce it
+    # and delegated descendants inherit the same restriction.
+    if task.completion_contract == "local-only":
+        env["HERMES_KANBAN_EFFECTS"] = "blocked"
+    else:
+        env.pop("HERMES_KANBAN_EFFECTS", None)
     for var in ("TERMINAL_TIMEOUT", "TERMINAL_MAX_FOREGROUND_TIMEOUT"):
         override = _worker_terminal_timeout_env(task.max_runtime_seconds, env.get(var))
         if override is not None:

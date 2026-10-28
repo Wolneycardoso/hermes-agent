@@ -423,10 +423,11 @@ class CreateTaskBody(BaseModel):
     parents: list[str] = Field(default_factory=list)
     triage: bool = False
     idempotency_key: Optional[str] = None
-    max_runtime_seconds: Optional[int] = None
+    max_runtime_seconds: Optional[int] = Field(default=None, ge=1)
+    max_retries: Optional[int] = Field(default=None, ge=1)
     skills: Optional[list[str]] = None
     goal_mode: bool = False
-    goal_max_turns: Optional[int] = None
+    goal_max_turns: Optional[int] = Field(default=None, ge=1)
     model_override: Optional[str] = None
     provider_override: Optional[str] = None
     reasoning_effort: Optional[str] = None  # none|minimal|…|ultra; None inherits the profile's level
@@ -468,11 +469,11 @@ class NaturalMissionBody(BaseModel):
     branch_name: Optional[str] = None
     project_id: Optional[str] = None
     idempotency_key: Optional[str] = None
-    max_runtime_seconds: Optional[int] = None
-    max_retries: Optional[int] = None
+    max_runtime_seconds: Optional[int] = Field(default=None, ge=1)
+    max_retries: Optional[int] = Field(default=None, ge=1)
     skills: Optional[list[str]] = None
     goal_mode: bool = False
-    goal_max_turns: Optional[int] = None
+    goal_max_turns: Optional[int] = Field(default=None, ge=1)
     model_override: Optional[str] = None
     provider_override: Optional[str] = None
     session_id: Optional[str] = None

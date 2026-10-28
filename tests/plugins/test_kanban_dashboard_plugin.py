@@ -147,6 +147,16 @@ def test_natural_intent_preview_is_read_only(client):
     assert client.get("/api/plugins/kanban/board").json()["latest_event_id"] == 0
 
 
+def test_natural_intent_rejects_invalid_runtime_limits(client):
+    response = client.post(
+        "/api/plugins/kanban/intent",
+        json={"request": "crie uma missão", "max_retries": 0},
+    )
+
+    assert response.status_code == 422
+    assert client.get("/api/plugins/kanban/board").json()["latest_event_id"] == 0
+
+
 def test_patch_board_sets_project_directory(client, tmp_path):
     """Board-level default_workdir must be editable after creation."""
     kb.create_board("late-config")

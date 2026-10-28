@@ -11,7 +11,7 @@ from dataclasses import dataclass
 import hashlib
 import re
 import sqlite3
-from typing import Iterable, Optional
+from typing import Iterable, Optional, cast
 
 from hermes_cli import kanban_db as kb
 
@@ -111,12 +111,7 @@ def create_mission(
 ) -> tuple[kb.Task, bool, NaturalMission]:
     """Create an idempotent triage mission and return ``(task, created, spec)``."""
     spec = prepare_mission(request, board=board, idempotency_key=idempotency_key)
-    existing = conn.execute(
-        "SELECT id FROM tasks WHERE idempotency_key = ? AND status != 'archived' "
-        "ORDER BY created_at DESC LIMIT 1",
-        (spec.idempotency_key,),
-    ).fetchone()
-    task_id = kb.create_task(
+    task_id, created = cast(tuple[str, bool], kb.create_task(
         conn,
         title=spec.title,
         body=spec.body,
@@ -140,8 +135,9 @@ def create_mission(
         session_id=session_id,
         completion_contract="local-only",
         board=board,
-    )
+        return_created=True,
+    ))
     task = kb.get_task(conn, task_id)
     if task is None:
         raise RuntimeError(f"created Kanban task {task_id} could not be read back")
-    return task, existing is None, spec
+    return task, created, spec
