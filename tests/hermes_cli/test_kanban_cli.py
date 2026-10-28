@@ -45,6 +45,38 @@ def test_run_slash_accepts_portuguese_create_alias(kanban_home):
     assert payload["title"] == "tarefa em português"
 
 
+def test_run_slash_accepts_natural_mission_request(kanban_home):
+    raw = kc.run_slash(
+        "crie um cliente para acompanhar os Kanbans no wo-os.me --json"
+    )
+    payload = json.loads(raw)
+
+    assert payload["created"] is True
+    assert payload["task"]["title"] == "um cliente para acompanhar os Kanbans no wo-os.me"
+    assert payload["task"]["status"] == "triage"
+    assert payload["task"]["body"]
+
+
+def test_natural_mission_request_is_idempotent(kanban_home):
+    request = "crie um cliente para acompanhar os Kanbans no wo-os.me"
+    first = json.loads(kc.run_slash(request + " --json"))
+    second = json.loads(kc.run_slash(request + " --json"))
+
+    assert first["task"]["id"] == second["task"]["id"]
+    assert first["created"] is True
+    assert second["created"] is False
+
+
+def test_natural_mission_preview_does_not_write(kanban_home):
+    raw = kc.run_slash("pedir um cliente Kanban --preview --json")
+    payload = json.loads(raw)
+
+    assert payload["preview"] is True
+    assert payload["title"] == "um cliente Kanban"
+    with kbc.connect() as conn:
+        assert kb.list_tasks(conn) == []
+
+
 def test_kanban_list_json_includes_session_id(kanban_home):
     """JSON output exposes `session_id` so external clients (Scarf, web
     dashboards) don't need a side query to filter by chat session."""

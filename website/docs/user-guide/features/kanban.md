@@ -35,6 +35,30 @@ The board has two front doors, both backed by the same `~/.hermes/kanban.db`:
 
 Both surfaces route through the same `kanban_db` layer, so reads see a consistent view and writes can't drift. The rest of this page shows CLI examples because they're easy to copy-paste, but every CLI verb has a tool-call equivalent the model uses.
 
+### Natural mission requests
+
+For work that needs planning, decomposition, or several profiles, use the natural
+mission path instead of manually filling every card field:
+
+```text
+/kanban crie um cliente somente leitura para acompanhar os Kanbans no wo-os.me
+```
+
+Long, unquoted Portuguese `crie` requests and free-form `/kanban` phrases are
+routed to the canonical `pedir` path. The path creates one idempotent parent in
+`triage`, preserves the original request, and lets the existing specifier,
+decomposer, and dispatcher create child tasks, dependencies, assignees, and
+acceptance criteria. `create` remains the structured single-task command; use
+`/kanban pedir ...` when the explicit form is clearer, or add `--preview` to
+inspect the normalized mission without writing.
+
+The Dashboard uses the same path when a task is created in the **triage** column.
+It sends the rough idea to `POST /api/plugins/kanban/intent`, so Discord, CLI,
+and Dashboard do not create competing queues. Natural missions default to a
+`local-only` completion contract: deploy, merge, publication, migrations,
+production changes, and external messages remain blocked until separately
+authorized.
+
 This is the shape that covers the workloads `delegate_task` can't:
 
 - **Research triage** — parallel researchers + analyst + writer, human-in-the-loop.

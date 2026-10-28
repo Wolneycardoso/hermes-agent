@@ -158,7 +158,7 @@ _SPECS = [
              "'default' and always exists."
          )),
     _cmd("create", [
-        _arg("title", help="Task title"),
+        _arg("title", nargs="+", help="Task title"),
         _arg("--body", help="Optional opening post"),
         _arg("--body-file", metavar="PATH",
              help="Read the opening post from a file ('-' = stdin), so bodies with embedded "
@@ -219,6 +219,29 @@ _SPECS = [
                   "to skip the brief running-to-blocked transition."),
         _json_flag(help="Emit JSON output"),
     ], aliases=["crie"], help="Create a new task"),
+    _cmd("pedir", [
+        _arg("request", nargs="+", help="Natural-language mission request"),
+        _arg("--assignee", help="Profile name to assign after triage"),
+        _arg("--workspace",
+             help="scratch | worktree | worktree:<path> | dir:<path> (default: board/project default)"),
+        _arg("--branch", help="Branch name for worktree tasks"),
+        _arg("--project", help="Link to a project (id or slug)"),
+        _TENANT,
+        _PRIORITY,
+        _arg("--skill", action="append", default=[], dest="skills",
+             help="Skill to force-load into decomposed workers (repeatable)"),
+        _arg("--max-runtime", help="Per-task runtime cap, e.g. 30m"),
+        _arg("--max-retries", type=int, metavar="N"),
+        _arg("--model", dest="model_override"),
+        _arg("--provider", dest="provider_override"),
+        _arg("--goal", action="store_true", dest="goal_mode"),
+        _arg("--goal-max-turns", type=int, metavar="N", dest="goal_max_turns"),
+        _arg("--idempotency-key", help="Override the deterministic dedup key"),
+        _arg("--created-by", default="user", help="Author name recorded on the mission"),
+        _arg("--preview", action="store_true", help="Show the normalized mission without writing it"),
+        _json_flag(help="Emit machine-readable JSON"),
+    ], aliases=["request", "intent"],
+         help="Create an idempotent triage mission from a natural-language request"),
     _cmd("swarm", [
         _arg("goal", help="Swarm goal / final outcome"),
         _arg("--worker", action="append", default=[], metavar="PROFILE:TITLE[:SKILL,SKILL]",

@@ -113,6 +113,40 @@ def test_create_task_appears_on_board(client):
     assert "acme" in data["tenants"]
     assert "researcher" in data["assignees"]
 
+def test_natural_intent_endpoint_creates_idempotent_triage_mission(client):
+    payload = {
+        "request": "crie um cliente para acompanhar os Kanbans no wo-os.me",
+        "workspace_kind": "worktree",
+    }
+    first = client.post("/api/plugins/kanban/intent", json=payload)
+    second = client.post("/api/plugins/kanban/intent", json=payload)
+
+    assert first.status_code == 200, first.text
+    assert second.status_code == 200, second.text
+    first_data = first.json()
+    second_data = second.json()
+    assert first_data["created"] is True
+    assert second_data["created"] is False
+    assert first_data["parent_task_id"] == second_data["parent_task_id"]
+    assert first_data["task"]["status"] == "triage"
+    assert first_data["task"]["workspace_kind"] == "worktree"
+    assert first_data["auto_decompose"] is True
+    assert first_data["blocked_external_effects"] is True
+
+
+def test_natural_intent_preview_is_read_only(client):
+    response = client.post(
+        "/api/plugins/kanban/intent",
+        json={"request": "crie um cliente Kanban", "preview": True},
+    )
+
+    assert response.status_code == 200, response.text
+    data = response.json()
+    assert data["preview"] is True
+    assert data["title"] == "um cliente Kanban"
+    assert client.get("/api/plugins/kanban/board").json()["latest_event_id"] == 0
+
+
 def test_patch_board_sets_project_directory(client, tmp_path):
     """Board-level default_workdir must be editable after creation."""
     kb.create_board("late-config")

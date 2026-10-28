@@ -36,6 +36,7 @@ from hermes_cli import kanban_db_notify as kbn
 from hermes_cli import kanban_db_dispatch as kbd
 from hermes_cli import kanban_db_workspace as kbw
 from hermes_cli import kanban_diagnostics as kd
+from hermes_cli import kanban_intent
 from hermes_cli.kanban_db import KANBAN_ATTACHMENT_MAX_BYTES, _collision_free_path, _safe_attachment_name
 
 log = logging.getLogger(__name__)
@@ -455,6 +456,87 @@ def create_task(payload: CreateTaskBody, board: Optional[str] = Query(None)):
             except Exception:
                 pass  # probe failure must never block the create itself
         return body
+
+
+class NaturalMissionBody(BaseModel):
+    request: str = Field(min_length=1, description="Natural-language mission request")
+    assignee: Optional[str] = None
+    tenant: Optional[str] = None
+    priority: int = 0
+    workspace_kind: Optional[str] = None
+    workspace_path: Optional[str] = None
+    branch_name: Optional[str] = None
+    project_id: Optional[str] = None
+    idempotency_key: Optional[str] = None
+    max_runtime_seconds: Optional[int] = None
+    max_retries: Optional[int] = None
+    skills: Optional[list[str]] = None
+    goal_mode: bool = False
+    goal_max_turns: Optional[int] = None
+    model_override: Optional[str] = None
+    provider_override: Optional[str] = None
+    session_id: Optional[str] = None
+    preview: bool = False
+
+
+@router.post("/intent")
+def create_natural_mission(payload: NaturalMissionBody, board: Optional[str] = Query(None)):
+    """Create one natural-language request as a durable triage mission.
+
+    This is the Dashboard counterpart of ``/kanban pedir``. It deliberately
+    returns the parent only: the existing triage/decompose/dispatcher pipeline
+    creates and routes children asynchronously.
+    """
+    board = _resolve_board(board)
+    with _value_error_400():
+        spec = kanban_intent.prepare_mission(
+            payload.request, board=board, idempotency_key=payload.idempotency_key
+        )
+    if payload.preview:
+        return {
+            "preview": True,
+            "title": spec.title,
+            "body": spec.body,
+            "idempotency_key": spec.idempotency_key,
+            "triage": True,
+            "auto_decompose": True,
+        }
+
+    with closing(_conn(board=board)) as conn, _value_error_400():
+        task, created, spec = kanban_intent.create_mission(
+            conn,
+            payload.request,
+            board=board,
+            assignee=payload.assignee,
+            created_by="dashboard",
+            workspace_kind=payload.workspace_kind,
+            workspace_path=payload.workspace_path,
+            branch_name=payload.branch_name,
+            project_id=payload.project_id,
+            tenant=payload.tenant,
+            priority=payload.priority,
+            skills=payload.skills,
+            max_retries=payload.max_retries,
+            max_runtime_seconds=payload.max_runtime_seconds,
+            model_override=payload.model_override,
+            provider_override=payload.provider_override,
+            goal_mode=payload.goal_mode,
+            goal_max_turns=payload.goal_max_turns,
+            session_id=payload.session_id,
+            idempotency_key=payload.idempotency_key,
+        )
+        task_dict = _task_dict(
+            task, current_run_started_at=kanban_db.current_run_started_ats(conn, [task.id]).get(task.id)
+        )
+    return {
+        "created": created,
+        "task": task_dict,
+        "parent_task_id": task.id,
+        "child_task_ids": [],
+        "auto_decompose": True,
+        "blocked_external_effects": True,
+        "idempotency_key": spec.idempotency_key,
+    }
 
 
 # --- Attachments — upload / list / download / delete ------------------------

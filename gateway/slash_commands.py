@@ -363,10 +363,14 @@ class GatewaySlashCommandsMixin(
         except Exception as exc:  # pragma: no cover - defensive
             return t("gateway.kanban.error_prefix", error=exc)
 
-        # Auto-subscribe on create, parsing the task id from the CLI's standard success line
-        # ("Created t_abcd  (ready, ...)"). With --json there is no such line, so a scripting user
-        # gets no subscription and can call /kanban notify-subscribe explicitly.
-        m = re.search(r"Created\s+(t_[0-9a-f]+)\b", output) if action == "create" and output else None
+        # Auto-subscribe on task creation, parsing the task id from the CLI's standard success line
+        # ("Created t_abcd  (ready, ...)") or the natural mission line
+        # ("Created mission t_abcd ..."). With --json there is no such line,
+        # so a scripting user can call /kanban notify-subscribe explicitly.
+        m = re.search(
+            r"(?:Created|Already exists)(?:\s+mission)?\s+(t_[0-9a-f]+)\b",
+            output,
+        ) if output else None
         if m:
             task_id = m.group(1)
             try:
