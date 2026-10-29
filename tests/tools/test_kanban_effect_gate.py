@@ -57,6 +57,18 @@ def test_local_only_filters_tool_schemas(monkeypatch):
     assert "execute_code" not in names
 
 
+def test_local_only_schema_cache_changes_when_policy_becomes_blocked(monkeypatch):
+    import model_tools
+
+    model_tools._clear_tool_defs_cache()
+    monkeypatch.setenv("HERMES_KANBAN_EFFECTS", "other")
+    initial = {item["function"]["name"] for item in model_tools.get_tool_definitions(quiet_mode=True)}
+    monkeypatch.setenv("HERMES_KANBAN_EFFECTS", "blocked")
+    restricted = {item["function"]["name"] for item in model_tools.get_tool_definitions(quiet_mode=True)}
+    assert "terminal" in initial
+    assert "terminal" not in restricted
+
+
 def test_local_only_terminal_guard_fails_closed_without_proven_isolation(monkeypatch):
     monkeypatch.setenv("HERMES_KANBAN_EFFECTS", "blocked")
 

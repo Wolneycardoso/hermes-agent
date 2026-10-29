@@ -22,7 +22,7 @@ from tools.registry import CHECK_FN_CACHE_BYPASS, check_fn_cache_scope, discover
 from tools.registry import _MAX_TOOL_ERROR_CHARS as _TOOL_ERROR_MAX_LEN
 from toolsets import resolve_toolset, validate_toolset
 from tools.arg_coercion import coerce_tool_args
-from tools.kanban_effect_gate import blocked_tool_message, local_only_tool_allowed
+from tools.kanban_effect_gate import blocked_tool_message, local_only_active, local_only_tool_allowed
 from tools.todo_tool import TODO_LEGACY_ALIASES, TODO_SCHEMA
 from utils import file_signature
 
@@ -277,7 +277,7 @@ def _tool_defs_cache_key(
         frozenset(disabled_toolsets) if disabled_toolsets else None, registry._generation, cfg_fp,
         bool(os.environ.get("HERMES_KANBAN_TASK")), bool(skip_tool_search_assembly),
         _is_delegated_child_context(), _is_dispatcher_owned_worker(),
-        bool(os.environ.get("HERMES_KANBAN_EFFECTS")), profile_scope,
+        local_only_active(), profile_scope,
     )
 
 
@@ -510,7 +510,7 @@ def _compute_tool_definitions(enabled_toolsets: Optional[List[str]] = None, disa
     from tools.kanban_toolset_context import scoped_kanban_toolset_selection
     with scoped_kanban_toolset_selection(enabled_toolsets):
         filtered_tools = _apply_dynamic_schemas(registry.get_definitions(tools_to_include, quiet=quiet_mode))
-    if os.environ.get("HERMES_KANBAN_EFFECTS", "").strip().lower() == "blocked":
+    if local_only_active():
         filtered_tools = [
             tool_def for tool_def in filtered_tools
             if local_only_tool_allowed(tool_def.get("function", {}).get("name", ""))
