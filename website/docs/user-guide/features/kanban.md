@@ -46,18 +46,19 @@ mission path instead of manually filling every card field:
 
 Long, unquoted Portuguese `crie` requests and free-form `/kanban` phrases are
 routed to the canonical `pedir` path. The path creates one idempotent parent in
-`triage`, preserves the original request, and lets the existing specifier,
-decomposer, and dispatcher create child tasks, dependencies, assignees, and
-acceptance criteria. `create` remains the structured single-task command; use
+`triage` and preserves the normalized request. Decomposition is asynchronous and
+may run later if enabled and the auxiliary model is available; it is not confirmed
+by the creation response. `create` remains the structured single-task command; use
 `/kanban pedir ...` when the explicit form is clearer, or add `--preview` to
 inspect the normalized mission without writing.
 
 The Dashboard uses the same path when a task is created in the **triage** column.
 It sends the rough idea to `POST /api/plugins/kanban/intent`, so Discord, CLI,
 and Dashboard do not create competing queues. Natural missions default to a
-`local-only` completion contract: deploy, merge, publication, migrations,
-production changes, and external messages remain blocked until separately
-authorized.
+`local-only` completion contract and an isolation policy. Worker execution is
+blocked until an isolated backend is available; creating a card does not start
+execution. Deploy, merge, publication, migrations, production changes, and external
+messages remain blocked until separately authorized.
 
 This is the shape that covers the workloads `delegate_task` can't:
 
@@ -74,7 +75,8 @@ The eight canonical collaboration patterns are catalogued in [Collaboration patt
 Declare PR work at creation with `--completion-contract OWNER/REPO` (or an exact
 `https://github.com/OWNER/REPO/pull/123` URL for existing work). `kanban_create`
 accepts the same `completion_contract`. Use `local-only` for intentionally local
-work; existing and undeclared cards retain that default. Prose URLs are not policy.
+work. Existing persisted `local-only` cards retain the restriction; undeclared new
+cards do not acquire it implicitly. Prose URLs are not policy.
 
 After publishing, pass `metadata.published_pr` to completion. The first matching
 URL binds the card permanently; retries cannot substitute a green sibling PR.

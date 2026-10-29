@@ -39,7 +39,7 @@ def test_unassigned_task_auto_assigned_with_default_assignee(isolated_kanban_hom
     from hermes_cli import kanban_db_dispatch as kbd
     with kbc.connect_closing() as conn:
         kb.create_board(slug="default", name="Test")
-        task_id = kb.create_task(conn, title="t1", assignee=None)
+        task_id = kb.create_task(conn, title="t1", assignee=None, completion_contract="owner/repo")
     with kbc.connect_closing() as conn:
         res = kbd.dispatch_once(
             conn, spawn_fn=_fake_spawn, dry_run=False,
@@ -80,7 +80,7 @@ def test_explicitly_assigned_task_untouched_by_default_assignee(isolated_kanban_
     from hermes_cli import kanban_db_dispatch as kbd
     with kbc.connect_closing() as conn:
         kb.create_board(slug="default", name="Test")
-        task_id = kb.create_task(conn, title="t1", assignee="default")
+        task_id = kb.create_task(conn, title="t1", assignee="default", completion_contract="owner/repo")
     with kbc.connect_closing() as conn:
         res = kbd.dispatch_once(
             conn, spawn_fn=_fake_spawn, dry_run=False,
@@ -88,5 +88,56 @@ def test_explicitly_assigned_task_untouched_by_default_assignee(isolated_kanban_
         )
     assert task_id not in res.auto_assigned_default
     assert any(s[0] == task_id and s[1] == "default" for s in res.spawned)
+
+
+def test_local_only_task_is_admitted_nowhere_and_dry_run_does_not_preview_spawn(isolated_kanban_home):
+    kb, _home = isolated_kanban_home
+    from hermes_cli import kanban_db_connect as kbc
+    from hermes_cli import kanban_db_dispatch as kbd
+
+    calls = []
+    def fake_spawn(*args, **kwargs):
+        calls.append((args, kwargs))
+        return 12345
+
+    with kbc.connect_closing() as conn:
+        kb.create_board(slug="default", name="Test")
+        task_id = kb.create_task(conn, title="local", assignee="default", completion_contract="local-only")
+    with kbc.connect_closing() as conn:
+        res = kbd.dispatch_once(conn, spawn_fn=fake_spawn, dry_run=True)
+
+    assert calls == []
+    assert res.spawned == []
+    assert res.skipped_local_only == [task_id]
+
+    with kbc.connect_closing() as conn:
+        res = kbd.dispatch_once(conn, spawn_fn=fake_spawn, dry_run=False)
+        row = conn.execute("SELECT status, claim_lock FROM tasks WHERE id = ?", (task_id,)).fetchone()
+        events = list(conn.execute(
+            "SELECT kind FROM task_events WHERE task_id = ? AND kind = 'skipped_local_only'", (task_id,)
+        ))
+    assert calls == []
+    assert row["status"] == "ready"
+    assert row["claim_lock"] is None
+    assert len(events) == 1
+    assert res.skipped_local_only == [task_id]
+
+
+def test_local_only_task_is_not_claimed_in_review_lane(isolated_kanban_home):
+    kb, _home = isolated_kanban_home
+    from hermes_cli import kanban_db_connect as kbc
+    from hermes_cli import kanban_db_dispatch as kbd
+
+    calls = []
+    with kbc.connect_closing() as conn:
+        kb.create_board(slug="default", name="Test")
+        task_id = kb.create_task(conn, title="local review", assignee="default", completion_contract="local-only")
+        conn.execute("UPDATE tasks SET status = 'review' WHERE id = ?", (task_id,))
+        conn.commit()
+    with kbc.connect_closing() as conn:
+        res = kbd.dispatch_once(conn, spawn_fn=lambda *a, **k: calls.append(a))
+
+    assert calls == []
+    assert res.skipped_local_only == [task_id]
 
 

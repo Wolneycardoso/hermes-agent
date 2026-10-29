@@ -125,6 +125,8 @@ class DispatchResult:
     Code terminal like ``orion-cc``), not a Hermes profile. Expected steady-state
     on multi-lane setups, NOT operator-actionable; tracked apart so health
     telemetry can tell "stuck" from "correctly idle"."""
+    skipped_local_only: list[str] = field(default_factory=list)
+    """Task ids refused before claim because no isolated worker backend exists."""
     skipped_per_profile_capped: list[tuple[str, str, int]] = field(default_factory=list)
     """``(task_id, assignee, current_running_count)`` deferred because the
     assignee is at ``kanban.max_in_progress_per_profile``. Picked up on a later
@@ -1764,7 +1766,9 @@ def dispatch_profile_allowlist_summary() -> str:
 def _has_spawnable(conn: sqlite3.Connection, status: str) -> bool:
     rows = conn.execute(
         "SELECT DISTINCT assignee FROM tasks "
-        "WHERE status = ? AND assignee IS NOT NULL AND claim_lock IS NULL",
+        "WHERE status = ? AND assignee IS NOT NULL AND claim_lock IS NULL "
+        "AND COALESCE(completion_contract, '') != 'local-only' "
+        "AND COALESCE(isolation_policy, '') != 'natural-local-only'",
         (status,),
     ).fetchall()
     if not rows:
@@ -2042,6 +2046,19 @@ def _dispatch_lane_task(
     skip is recorded on ``result``.
     """
     task_id = row["id"]
+    # A local-only contract cannot be made safe by restricting tools inside a
+    # host worker. Refuse before admission, claim, workspace setup, or spawn.
+    if row["completion_contract"] == "local-only" or row["isolation_policy"] == "natural-local-only":
+        result.skipped_local_only.append(task_id)
+        if not dry_run:
+            with _kb.write_txn(conn):
+                last = conn.execute(
+                    "SELECT kind, payload FROM task_events WHERE task_id = ? "
+                    "ORDER BY created_at DESC, id DESC LIMIT 1", (task_id,)).fetchone()
+                payload = _kb._json_or_null({"reason": "isolated_worker_backend_unavailable"})
+                if last is None or last["kind"] != "skipped_local_only" or last["payload"] != payload:
+                    _kb._append_event(conn, task_id, "skipped_local_only", {"reason": "isolated_worker_backend_unavailable"})
+        return False
     # Non-profile assignees (control-plane lanes that pull via ``claim_task``)
     # would fail ``hermes -p <assignee>`` at startup and loop ready→crash→ready
     # forever. Bucketed apart from skipped_unassigned: the operator cannot fix
@@ -2269,7 +2286,7 @@ def _tick_spawn_budget(
 def _lane_rows(conn: sqlite3.Connection, status: str) -> list[sqlite3.Row]:
     """Unclaimed rows of one lane in dispatch order."""
     return conn.execute(
-        "SELECT id, assignee FROM tasks "
+        "SELECT id, assignee, completion_contract, isolation_policy FROM tasks "
         f"WHERE status = '{status}' AND claim_lock IS NULL "
         "ORDER BY priority DESC, created_at ASC"
     ).fetchall()
@@ -2297,6 +2314,8 @@ def _any_spawnable_review(
     for row in review_rows:
         assignee = row["assignee"]
         if not assignee:
+            continue
+        if row["completion_contract"] == "local-only" or row["isolation_policy"] == "natural-local-only":
             continue
         if profile_exists is not None and not profile_exists(assignee):
             continue
@@ -2837,6 +2856,8 @@ def _default_spawn(task: Task, workspace: str, *, board: Optional[str] = None) -
     ``HERMES_KANBAN_DB`` / ``HERMES_KANBAN_BOARD`` / workspaces_root to the
     board the task was claimed from, so workers cannot see other boards.
     """
+    if task.completion_contract == "local-only" or task.isolation_policy == "natural-local-only":
+        raise RuntimeError("isolated worker backend unavailable; refusing host spawn")
     if not task.assignee:
         raise ValueError(f"task {task.id} has no assignee")
 

@@ -460,13 +460,15 @@ def _cmd_intent(args: argparse.Namespace) -> int:
             "body": spec.body,
             "idempotency_key": spec.idempotency_key,
             "triage": True,
-            "auto_decompose": True,
+            "decomposition_status": "not_confirmed",
+            "execution_status": "blocked_pending_isolation",
         }
         if getattr(args, "json", False):
             _print_json(payload)
         else:
             print(f"Preview: {spec.title}\n"
-                  f"status=triage, auto_decompose=true, idempotency_key={spec.idempotency_key}")
+                  f"status=triage, idempotency_key={spec.idempotency_key}; "
+                  "decomposition may run later if enabled; execution blocked pending isolation")
         return 0
 
     with kbc.connect_closing() as conn:
@@ -495,8 +497,8 @@ def _cmd_intent(args: argparse.Namespace) -> int:
         "created": created,
         "task": _task_to_dict(task),
         "parent_task_id": task.id,
-        "child_task_ids": [],
-        "auto_decompose": True,
+        "decomposition_status": "not_confirmed",
+        "execution_status": "blocked_pending_isolation",
         "blocked_external_effects": True,
         "idempotency_key": spec.idempotency_key,
     }
@@ -504,7 +506,8 @@ def _cmd_intent(args: argparse.Namespace) -> int:
         _print_json(payload)
     else:
         verb = "Created" if created else "Already exists"
-        print(f"{verb} mission {task.id}  (triage, auto-decompose=true, assignee={task.assignee or '-'})")
+        print(f"{verb} mission {task.id}  (status={task.status}, assignee={task.assignee or '-'})\n"
+              "Decomposition may run later if enabled; execution blocked pending isolated worker.")
     return 0
 
 

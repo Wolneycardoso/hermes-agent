@@ -115,7 +115,7 @@ def decompose_triage_task(
     now = int(time.time())
     with write_txn(conn):
         root_row = conn.execute(
-            "SELECT id, status, tenant, workspace_kind, workspace_path, completion_contract "
+            "SELECT id, status, tenant, workspace_kind, workspace_path, completion_contract, isolation_policy "
             "FROM tasks WHERE id = ?", (task_id,),
         ).fetchone()
         if root_row is None or root_row["status"] != "triage":
@@ -199,15 +199,16 @@ def _insert_decomposed_child(
     completion_contract = (
         "local-only" if root_row["completion_contract"] == "local-only" else None
     )
+    isolation_policy = root_row["isolation_policy"]
     conn.execute(
         "INSERT INTO tasks "
         "(id, title, body, assignee, status, workspace_kind, "
-        " workspace_path, tenant, created_at, created_by, completion_contract) "
-        "VALUES (?, ?, ?, ?, 'todo', ?, ?, ?, ?, ?, ?)",
+        " workspace_path, tenant, created_at, created_by, completion_contract, isolation_policy) "
+        "VALUES (?, ?, ?, ?, 'todo', ?, ?, ?, ?, ?, ?, ?)",
         (
             new_id, child["title"].strip(), body if isinstance(body, str) else None,
             _canonical_assignee(child.get("assignee")), child_ws_kind, child_ws_path,
-            root_row["tenant"], now, (author or "decomposer"), completion_contract,
+            root_row["tenant"], now, (author or "decomposer"), completion_contract, isolation_policy,
         ),
     )
     _append_event(

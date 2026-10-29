@@ -20,7 +20,6 @@ _BLOCKED_VALUE = "blocked"
 # local-only safety is reviewed, rather than silently becoming available.
 _LOCAL_ONLY_ALLOWED_TOOLS = frozenset({
     "web_search", "web_extract", "vision_analyze",
-    "terminal",
     "read_file", "write_file", "patch", "search_files",
     "skills_list", "skill_view", "skill_manage",
     "todo_list",
@@ -51,6 +50,35 @@ _EXTERNAL_COMMAND_PATTERNS = tuple(re.compile(pattern, re.IGNORECASE) for patter
     r"\b(?:curl|wget)\b",
 ))
 
+# A local-only worker may inspect and compile code, but an executable test/build
+# runner can execute repository-controlled code with subprocess, network,
+# filesystem, or deployment effects. Reject those forms before the narrower
+# publication patterns below. The terminal tool remains usable for simple
+# commands such as ``python -m py_compile`` and ``node --check``.
+_LOCAL_ONLY_UNSAFE_SYNTAX = tuple(re.compile(pattern, re.IGNORECASE) for pattern in (
+    r"[;&|]", r"[\r\n]", r"`", r"\$\(", r"[<>]{1,2}",
+    r"(?:^|[\s;|])(?:bash|sh|dash|zsh|fish|ksh|pwsh|powershell|cmd)(?:\s|$)",
+    r"(?:^|[\s;|])(?:env|xargs|eval|exec|make|just|task)(?:\s|$)",
+    r"(?:^|[\s;|])(?:pytest|py\.test|nose|nosetests|unittest|tox|nox|coverage|jest|vitest|mocha|rspec)(?:\s|$)",
+    r"(?:^|[\s;|])(?:npm|pnpm|yarn|bun)(?:\s|$)",
+    r"(?:^|[\s;|])(?:cargo\s+test|go\s+test|mvn\s+test|gradle\s+test|bundle\s+exec)(?:\s|$)",
+    r"\b(?:python|python3|pypy|node|nodejs|perl|ruby|php)\s+(?:-c|-e|--eval|--print|-r)\b",
+    r"(?:^|[\s;|])(?:python|python3|pypy)(?:\s|$)",
+    r"(?:^|[\s;|])(?:node|nodejs|perl|ruby|php)(?:\s|$)",
+    r"\bpython(?:3)?\s+-m\s+(?:http\.server|socket|smtplib|imaplib|ftplib)\b",
+    r"\b(?:pip|uv)\s+(?:install|add|sync)\b",
+))
+
+_LOCAL_ONLY_SAFE_SYNTAX = tuple(re.compile(pattern, re.IGNORECASE) for pattern in (
+    r"^\s*(?:python|python3|pypy)\s+-m\s+(?:py_compile|compileall)(?:\s+[^;&|<>`$]+)?\s*$",
+    r"^\s*(?:python|python3|pypy)\s+(?:-V|--version)\s*$",
+    r"^\s*(?:node|nodejs)\s+--check\s+[^;&|<>`$]+\s*$",
+    r"^\s*(?:node|nodejs)\s+(?:-v|--version)\s*$",
+    r"^\s*(?:perl)\s+-c\s+[^;&|<>`$]+\s*$",
+    r"^\s*(?:ruby)\s+-c\s+[^;&|<>`$]+\s*$",
+    r"^\s*(?:php)\s+-l\s+[^;&|<>`$]+\s*$",
+))
+
 
 def local_only_active() -> bool:
     """Return whether the current process is executing a local-only task."""
@@ -75,17 +103,21 @@ def blocked_tool_message(tool_name: str, _args: Optional[dict[str, Any]] = None)
 
 
 def local_only_terminal_block(command: str) -> Optional[str]:
-    """Return a block reason for known external-effect shell commands."""
+    """Fail closed until a real OS isolation backend is proven and wired.
+
+    This is intentionally command-independent: command inspection cannot form a
+    security boundary because scripts and alternate executables can execute
+    arbitrary code. The regex tables below are retained only for compatibility
+    with callers/tests outside the local-only path; they are never consulted
+    while the capability is unproven.
+    """
     if not local_only_active() or not isinstance(command, str):
         return None
-    for pattern in _EXTERNAL_COMMAND_PATTERNS:
-        if pattern.search(command):
-            return (
-                "Blocked: this Kanban mission has a local-only completion contract "
-                "and the terminal command matches an external-effect operation "
-                f"({pattern.pattern})."
-            )
-    return None
+    return (
+        "Blocked: this Kanban mission requires a proven OS isolation backend for "
+        "local-only execution; no such backend is integrated, so terminal execution "
+        "is disabled without fallback to the host."
+    )
 
 
 __all__ = [

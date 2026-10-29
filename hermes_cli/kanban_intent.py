@@ -134,6 +134,7 @@ def create_mission(
         goal_max_turns=goal_max_turns,
         session_id=session_id,
         completion_contract="local-only",
+        isolation_policy="natural-local-only",
         board=board,
         return_created=True,
     ))

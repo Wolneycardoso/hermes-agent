@@ -500,7 +500,8 @@ def create_natural_mission(payload: NaturalMissionBody, board: Optional[str] = Q
             "body": spec.body,
             "idempotency_key": spec.idempotency_key,
             "triage": True,
-            "auto_decompose": True,
+            "decomposition_status": "not_confirmed",
+            "execution_status": "blocked_pending_isolation",
         }
 
     with closing(_conn(board=board)) as conn, _value_error_400():
@@ -533,8 +534,8 @@ def create_natural_mission(payload: NaturalMissionBody, board: Optional[str] = Q
         "created": created,
         "task": task_dict,
         "parent_task_id": task.id,
-        "child_task_ids": [],
-        "auto_decompose": True,
+        "decomposition_status": "not_confirmed",
+        "execution_status": "blocked_pending_isolation",
         "blocked_external_effects": True,
         "idempotency_key": spec.idempotency_key,
     }

@@ -3238,6 +3238,11 @@
                 }, t.warnings.highest_severity === "critical" ? "!!!" :
                    t.warnings.highest_severity === "error" ? "!!" : "⚠")
               : null,
+            t.isolation_policy === "natural-local-only" || t.completion_contract === "local-only"
+              ? h(Badge, { variant: "outline", className: "hermes-kanban-tag",
+                           title: "Worker execution is blocked until an isolated backend is available." },
+                  tx(i18n, "isolationPending", "Execution blocked: isolation pending"))
+              : null,
             t.priority > 0
               ? h(Badge, { className: "hermes-kanban-priority",
                            title: `Priority ${t.priority}. Higher-priority tasks are claimed first by the dispatcher.` }, `P${t.priority}`)

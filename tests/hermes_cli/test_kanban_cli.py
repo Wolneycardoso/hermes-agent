@@ -58,6 +58,17 @@ def test_run_slash_accepts_natural_mission_request(kanban_home):
     assert payload["task"]["body"]
 
 
+def test_natural_mission_reports_restrictions_without_promising_decomposition(kanban_home):
+    payload = json.loads(kc.run_slash("pedir elaborar um relatório --json"))
+    assert payload["task"]["isolation_policy"] == "natural-local-only"
+    assert payload["decomposition_status"] == "not_confirmed"
+    assert "auto_decompose" not in payload
+    assert payload["execution_status"] == "blocked_pending_isolation"
+    message = kc.run_slash("pedir organizar documentos")
+    assert "execution blocked" in message.lower()
+    assert "if enabled" in message.lower()
+
+
 def test_natural_mission_request_is_idempotent(kanban_home):
     request = "crie um cliente para acompanhar os Kanbans no wo-os.me"
     first = json.loads(kc.run_slash(request + " --json"))

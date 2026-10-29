@@ -130,7 +130,10 @@ def test_natural_intent_endpoint_creates_idempotent_triage_mission(client):
     assert first_data["parent_task_id"] == second_data["parent_task_id"]
     assert first_data["task"]["status"] == "triage"
     assert first_data["task"]["workspace_kind"] == "worktree"
-    assert first_data["auto_decompose"] is True
+    assert first_data["task"]["isolation_policy"] == "natural-local-only"
+    assert first_data["decomposition_status"] == "not_confirmed"
+    assert first_data["execution_status"] == "blocked_pending_isolation"
+    assert "auto_decompose" not in first_data
     assert first_data["blocked_external_effects"] is True
 
 

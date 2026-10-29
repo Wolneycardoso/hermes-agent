@@ -1113,6 +1113,21 @@ def check_all_command_guards(command: str, env_type: str,
     """Run all pre-exec security checks and return a single approval decision. Plugins that
     want to veto or escalate a command do it from ``pre_tool_call``.
     ``has_host_access``: a Docker sandbox with bind-mounted host paths takes the normal flow."""
+    # This gate must run before container shortcuts, prepared approvals, YOLO,
+    # and any generic lifecycle/dangerous-command prompt. A local-only task is
+    # a capability restriction, not a request for human approval to be bypassed
+    # by another terminal entry point.
+    from tools.kanban_effect_gate import local_only_terminal_block
+    local_only_error = local_only_terminal_block(command)
+    if local_only_error:
+        return {
+            "approved": False,
+            "status": "blocked",
+            "message": local_only_error,
+            "description": "local-only effect gate",
+            "command": command,
+        }
+
     if _should_skip_container_guards(env_type, has_host_access=has_host_access):
         return _user_deny_block(command) or _approved()
 
