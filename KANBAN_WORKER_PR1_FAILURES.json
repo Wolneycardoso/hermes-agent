@@ -1,0 +1,116 @@
+{
+  "test_atomic_deadline_gate_blocks_delayed_completion": {
+    "observed": "claim_task returned None; STALE_RUN before scenario body",
+    "classification": "fixture assumes legacy claim; PR1 correctly rejects; isolated backend claim capability absent",
+    "bridgeRegressionDemonstrated": false,
+    "postClaimBehaviorOnPR1": "not exercised"
+  },
+  "test_atomic_gate_rejects_terminal_state_changed_after_verification": {
+    "observed": "claim_task returned None; STALE_RUN before scenario body",
+    "classification": "fixture assumes legacy claim; PR1 correctly rejects; isolated backend claim capability absent",
+    "bridgeRegressionDemonstrated": false,
+    "postClaimBehaviorOnPR1": "not exercised"
+  },
+  "test_completed_ack_loss_reconciles_real_kanban": {
+    "observed": "claim_task returned None; STALE_RUN before scenario body",
+    "classification": "fixture assumes legacy claim; PR1 correctly rejects; isolated backend claim capability absent",
+    "bridgeRegressionDemonstrated": false,
+    "postClaimBehaviorOnPR1": "not exercised"
+  },
+  "test_concurrent_block_intent_is_immutable_and_readback_matches": {
+    "observed": "claim_task returned None; STALE_RUN before scenario body",
+    "classification": "fixture assumes legacy claim; PR1 correctly rejects; isolated backend claim capability absent",
+    "bridgeRegressionDemonstrated": false,
+    "postClaimBehaviorOnPR1": "not exercised"
+  },
+  "test_concurrent_old_return_cannot_bypass_new_correction": {
+    "observed": "claim_task returned None; STALE_RUN before scenario body",
+    "classification": "fixture assumes legacy claim; PR1 correctly rejects; isolated backend claim capability absent",
+    "bridgeRegressionDemonstrated": false,
+    "postClaimBehaviorOnPR1": "not exercised"
+  },
+  "test_crash_before_block_resumes": {
+    "observed": "claim_task returned None; STALE_RUN before scenario body",
+    "classification": "fixture assumes legacy claim; PR1 correctly rejects; isolated backend claim capability absent",
+    "bridgeRegressionDemonstrated": false,
+    "postClaimBehaviorOnPR1": "not exercised"
+  },
+  "test_crash_before_terminal_effect_resumes_after_reverification": {
+    "observed": "claim_task returned None; STALE_RUN before scenario body",
+    "classification": "fixture assumes legacy claim; PR1 correctly rejects; isolated backend claim capability absent",
+    "bridgeRegressionDemonstrated": false,
+    "postClaimBehaviorOnPR1": "not exercised"
+  },
+  "test_deadline_not_renewed_and_no_false_success": {
+    "observed": "claim_task returned None; STALE_RUN before scenario body",
+    "classification": "fixture assumes legacy claim; PR1 correctly rejects; isolated backend claim capability absent",
+    "bridgeRegressionDemonstrated": false,
+    "postClaimBehaviorOnPR1": "not exercised"
+  },
+  "test_identity_cannot_change_on_retry": {
+    "observed": "claim_task returned None; STALE_RUN before scenario body",
+    "classification": "fixture assumes legacy claim; PR1 correctly rejects; isolated backend claim capability absent",
+    "bridgeRegressionDemonstrated": false,
+    "postClaimBehaviorOnPR1": "not exercised"
+  },
+  "test_invalid_verifier_contract_cannot_complete": {
+    "observed": "claim_task returned None; STALE_RUN before scenario body",
+    "classification": "fixture assumes legacy claim; PR1 correctly rejects; isolated backend claim capability absent",
+    "bridgeRegressionDemonstrated": false,
+    "postClaimBehaviorOnPR1": "not exercised"
+  },
+  "test_job_identity_cannot_be_rebound": {
+    "observed": "claim_task returned None; STALE_RUN before scenario body",
+    "classification": "fixture assumes legacy claim; PR1 correctly rejects; isolated backend claim capability absent",
+    "bridgeRegressionDemonstrated": false,
+    "postClaimBehaviorOnPR1": "not exercised"
+  },
+  "test_lost_ack_readback_does_not_resend": {
+    "observed": "claim_task returned None; STALE_RUN before scenario body",
+    "classification": "fixture assumes legacy claim; PR1 correctly rejects; isolated backend claim capability absent",
+    "bridgeRegressionDemonstrated": false,
+    "postClaimBehaviorOnPR1": "not exercised"
+  },
+  "test_missing_block_diagnosis_rejected": {
+    "observed": "claim_task returned None; STALE_RUN before scenario body",
+    "classification": "fixture assumes legacy claim; PR1 correctly rejects; isolated backend claim capability absent",
+    "bridgeRegressionDemonstrated": false,
+    "postClaimBehaviorOnPR1": "not exercised"
+  },
+  "test_no_progress_blocks_with_reason_and_action": {
+    "observed": "claim_task returned None; STALE_RUN before scenario body",
+    "classification": "fixture assumes legacy claim; PR1 correctly rejects; isolated backend claim capability absent",
+    "bridgeRegressionDemonstrated": false,
+    "postClaimBehaviorOnPR1": "not exercised"
+  },
+  "test_readback_exhausts_budget_before_send": {
+    "observed": "claim_task returned None; STALE_RUN before scenario body",
+    "classification": "fixture assumes legacy claim; PR1 correctly rejects; isolated backend claim capability absent",
+    "bridgeRegressionDemonstrated": false,
+    "postClaimBehaviorOnPR1": "not exercised"
+  },
+  "test_real_admission_delegation_local_acceptance": {
+    "observed": "claim_task returned None; STALE_RUN before scenario body",
+    "classification": "fixture assumes legacy claim; PR1 correctly rejects; isolated backend claim capability absent",
+    "bridgeRegressionDemonstrated": false,
+    "postClaimBehaviorOnPR1": "not exercised"
+  },
+  "test_rejected_remote_admission_never_delegates": {
+    "observed": "claim_task returned None; STALE_RUN before scenario body",
+    "classification": "fixture assumes legacy claim; PR1 correctly rejects; isolated backend claim capability absent",
+    "bridgeRegressionDemonstrated": false,
+    "postClaimBehaviorOnPR1": "not exercised"
+  },
+  "test_specific_correction_then_verified_success": {
+    "observed": "claim_task returned None; STALE_RUN before scenario body",
+    "classification": "fixture assumes legacy claim; PR1 correctly rejects; isolated backend claim capability absent",
+    "bridgeRegressionDemonstrated": false,
+    "postClaimBehaviorOnPR1": "not exercised"
+  },
+  "test_wrong_return_identity_rejected": {
+    "observed": "claim_task returned None; STALE_RUN before scenario body",
+    "classification": "fixture assumes legacy claim; PR1 correctly rejects; isolated backend claim capability absent",
+    "bridgeRegressionDemonstrated": false,
+    "postClaimBehaviorOnPR1": "not exercised"
+  }
+}
