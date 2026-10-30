@@ -51,6 +51,7 @@ from agent.tool_dispatch_helpers import (
     make_tool_result_message,
 )
 from tools.terminal_tool_lifecycle import get_active_env
+from tools.kanban_effect_gate import blocked_tool_message
 from tools.thread_context import propagate_context_to_thread
 from tools.tool_result_storage import (
     maybe_persist_tool_result,
@@ -707,6 +708,10 @@ def _dispatch_authorized_once(
             callback()
 
     block_message, block_error_type = scope_block, "tool_scope_block"
+    if block_message is None:
+        local_only_block = blocked_tool_message(ref.name, ref.args)
+        if local_only_block is not None:
+            block_message, block_error_type = local_only_block, "local_only_effect_gate"
     if block_message is None:
         block_error_type = "plugin_block"
         resolve = lambda: _pre_tool_block(agent, ref)  # noqa: E731

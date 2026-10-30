@@ -22,6 +22,7 @@ from tools.registry import CHECK_FN_CACHE_BYPASS, check_fn_cache_scope, discover
 from tools.registry import _MAX_TOOL_ERROR_CHARS as _TOOL_ERROR_MAX_LEN
 from toolsets import resolve_toolset, validate_toolset
 from tools.arg_coercion import coerce_tool_args
+from tools.kanban_effect_gate import blocked_tool_message, local_only_active, local_only_tool_allowed
 from tools.todo_tool import TODO_LEGACY_ALIASES, TODO_SCHEMA
 from utils import file_signature
 
@@ -275,7 +276,8 @@ def _tool_defs_cache_key(
         registry.current_scope_key(), frozenset(enabled_toolsets) if enabled_toolsets is not None else None,
         frozenset(disabled_toolsets) if disabled_toolsets else None, registry._generation, cfg_fp,
         bool(os.environ.get("HERMES_KANBAN_TASK")), bool(skip_tool_search_assembly),
-        _is_delegated_child_context(), _is_dispatcher_owned_worker(), profile_scope,
+        _is_delegated_child_context(), _is_dispatcher_owned_worker(),
+        local_only_active(), profile_scope,
     )
 
 
@@ -508,6 +510,11 @@ def _compute_tool_definitions(enabled_toolsets: Optional[List[str]] = None, disa
     from tools.kanban_toolset_context import scoped_kanban_toolset_selection
     with scoped_kanban_toolset_selection(enabled_toolsets):
         filtered_tools = _apply_dynamic_schemas(registry.get_definitions(tools_to_include, quiet=quiet_mode))
+    if local_only_active():
+        filtered_tools = [
+            tool_def for tool_def in filtered_tools
+            if local_only_tool_allowed(tool_def.get("function", {}).get("name", ""))
+        ]
     global _last_resolved_tool_names
     _last_resolved_tool_names = [t["function"]["name"] for t in filtered_tools]
 
@@ -898,6 +905,11 @@ def handle_function_call(
         _emit_post_tool_call_hook(function_name=function_name, function_args=function_args, result=result,
                                   **asdict(ids), middleware_trace=list(trace), **extra)
         return result
+
+    blocked = blocked_tool_message(function_name, function_args)
+    if blocked is not None:
+        return _emit(tool_error(blocked), status="blocked", error_type="local_only_effect_gate",
+                     error_message=blocked)
 
     # Tool Search bridge: tool_search / tool_describe are catalog reads handled
     # inline; tool_call is unwrapped so every downstream hook (pre/post, edit

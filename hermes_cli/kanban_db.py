@@ -27,7 +27,7 @@ import time
 from contextvars import ContextVar, Token
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterable, Optional
+from typing import Any, Iterable, Literal, Optional, overload
 
 from hermes_cli.kanban_workflow import DEFAULT_STATUSES as VALID_STATUSES
 from toolsets import get_toolset_names
@@ -665,6 +665,7 @@ class Task:
     block_kind: Optional[str] = None
     block_recurrences: int = 0               # unblock-loop counter, see BLOCK_RECURRENCE_LIMIT
     completion_contract: Optional[str] = None
+    isolation_policy: Optional[str] = None
 
     @classmethod
     def from_row(cls, row: sqlite3.Row) -> "Task":
@@ -694,7 +695,7 @@ _TASK_REQUIRED_COLUMNS = (
 _TASK_OPTIONAL_COLUMNS = (
     "branch_name", "project_id", "tenant", "result", "idempotency_key", "worker_pid",
     "max_runtime_seconds", "last_heartbeat_at", "current_run_id", "workflow_template_id",
-    "current_step_key", "max_retries", "session_id", "completion_contract",
+    "current_step_key", "max_retries", "session_id", "completion_contract", "isolation_policy",
 )
 # Text columns where "" is stored/read as "not set".
 _TASK_EMPTY_IS_NULL_COLUMNS = (
@@ -1139,44 +1140,12 @@ def _project_from_source_task(
     return project_obj, project_repo
 
 
-def _normalize_task_skills(skills: Optional[Iterable[str]]) -> Optional[list[str]]:
-    """Strip/dedupe a skills list. Commas are refused (a comma-joined string must
-    not land in one argv slot); toolset names are rejected all at once because
-    agents that confuse the two usually pass several."""
-    if skills is None:
-        return None
-    cleaned: list[str] = []
-    seen: set[str] = set()
-    toolset_typos: list[str] = []
-    for s in skills:
-        if not s:
-            continue
-        name = str(s).strip()
-        if not name:
-            continue
-        if "," in name:
-            raise ValueError(
-                f"skill name cannot contain comma: {name!r} "
-                f"(pass a list of separate names instead of a comma-joined string)"
-            )
-        if name.casefold() in KNOWN_TOOLSET_NAMES:
-            toolset_typos.append(name)
-            continue
-        if name in seen:
-            continue
-        seen.add(name)
-        cleaned.append(name)
-    if toolset_typos:
-        quoted = ", ".join(repr(n) for n in toolset_typos)
-        noun = "is a toolset name" if len(toolset_typos) == 1 else "are toolset names"
-        raise ValueError(
-            f"{quoted} {noun}, not skill name(s). "
-            "Put toolsets in the assignee profile's `toolsets:` config "
-            "instead of per-task skills. Skills are named skill bundles "
-            "(e.g. `blogwatcher`, `github-code-review`); toolsets are runtime "
-            "capabilities (e.g. `web`, `browser`, `terminal`)."
-        )
-    return cleaned
+@overload
+def create_task(*args: Any, return_created: Literal[True], **kwargs: Any) -> tuple[str, bool]: ...
+
+
+@overload
+def create_task(*args: Any, return_created: Literal[False] = False, **kwargs: Any) -> str: ...
 
 
 def create_task(
@@ -1193,7 +1162,9 @@ def create_task(
     project_source_task_id: Optional[str] = None,
     creator_task_id: Optional[str] = None,
     completion_contract: Optional[str] = None,
-) -> str:
+    isolation_policy: Optional[str] = None,
+    return_created: bool = False,
+) -> str | tuple[str, bool]:
     """Create a task (optionally under ``parents``); returns its id.
 
     Status: ``ready`` unless a parent is not ``done`` (``todo``); ``triage=True``
@@ -1208,22 +1179,36 @@ def create_task(
     in the active profile's projects.db — see ``_resolve_project_link``.
     ``workspace_kind=None`` (omitted) inherits a project-scoped board's project;
     an explicit ``"scratch"`` or ``project_id=""`` is a request for no project.
+    ``return_created=True`` returns ``(task_id, created)``; the idempotency
+    decision is made inside the write transaction so concurrent callers cannot
+    report a false creation.
     """
     from hermes_cli.kanban_db_graph import initial_task_state, inherit_creator_origin
+    from hermes_cli.kanban_db_validation import normalize_task_skills
+    from hermes_cli.kanban_db_safety import (
+        TaskIdCollision, find_idempotent_task, inherited_isolation, record_initial_state, validate_inserted_task,
+    )
     from hermes_cli.kanban_pr_acceptance import validate_contract
 
     completion_contract = validate_contract(completion_contract)
+    if isolation_policy not in (None, "natural-local-only"):
+        raise ValueError("isolation_policy must be natural-local-only or omitted")
     model_override, provider_override = _validate_model_override(model_override, provider_override)
     reasoning_effort = normalize_reasoning_effort(reasoning_effort)
     assignee = _canonical_assignee(assignee)
+    for field_name, field_value in (
+        ("max_runtime_seconds", max_runtime_seconds),
+        ("max_retries", max_retries),
+        ("goal_max_turns", goal_max_turns),
+    ):
+        if field_value is not None and int(field_value) < 1:
+            raise ValueError(f"{field_name} must be >= 1")
     if not title or not title.strip():
         raise ValueError("title is required")
     if initial_status not in VALID_INITIAL_STATUSES:
         raise ValueError(f"initial_status must be one of {sorted(VALID_INITIAL_STATUSES)}")
-    # A project-scoped board anchors every new task to its project's repo
-    # (deterministic worktree + branch) without each surface repeating it.
-    # An explicit ``scratch`` (or ``project_id=""``) is a request for no project:
-    # it must not be upgraded to a worktree in the board's repo (#106342).
+
+    # An explicit scratch workspace must not inherit a board's project repository.
     if project_id is None and workspace_kind != "scratch":
         try:
             project_id = (_board_meta_for(board).get("project_id") or "").strip() or None
@@ -1245,45 +1230,35 @@ def create_task(
         conn, project_id, project_source_task_id, workspace_kind, workspace_path
     )
     parents = tuple(p for p in parents if p)
-    skills_list = _normalize_task_skills(skills)
-
-    # Idempotency check BEFORE the write txn (no lock held); a concurrent-create
-    # race may insert twice, the next lookup stabilises on the newest.
-    if idempotency_key:
-        row = conn.execute(
-            "SELECT id FROM tasks WHERE idempotency_key = ? "
-            "AND status != 'archived' "
-            "ORDER BY created_at DESC LIMIT 1", (idempotency_key,),
-        ).fetchone()
-        if row:
-            return row["id"]
-
+    skills_list = normalize_task_skills(skills, KNOWN_TOOLSET_NAMES)
     now = int(time.time())
-
-    # Only persistent kinds inherit the board ``default_workdir``: a scratch
-    # task inheriting it would point cleanup at the user's source tree.
+    # Scratch cleanup must never point at the board's persistent source tree.
     if workspace_path is None and project_repo is None and workspace_kind in {"dir", "worktree"}:
         board_default = _board_meta_for(board).get("default_workdir")
         if board_default:
             workspace_path = str(board_default)
-
-    # Retry once on the extremely unlikely id collision.
     for attempt in range(2):
         task_id = _new_task_id()
         try:
-            # allow_nested: graph builders compose create_task under one outer
-            # commit so the dispatcher never sees a half-built graph.
+            # Nested graph builders commit atomically; collision retries roll back first.
             with write_txn(conn, allow_nested=True):
+                inherited_contract, inherited_policy = inherited_isolation(conn, parents, creator_task_id)
+                existing_id = find_idempotent_task(
+                    conn, idempotency_key, completion_contract, isolation_policy,
+                    inherited_contract, inherited_policy,
+                )
+                if existing_id is not None:
+                    return (existing_id, False) if return_created else existing_id
+                effective_contract = completion_contract
+                effective_policy = "natural-local-only" if (inherited_contract or inherited_policy) else isolation_policy
                 task_status, tenant = initial_task_state(conn, parents, initial_status, triage, tenant)
-                # Project worktree: fresh dir under the repo + deterministic
-                # branch, instead of the random ``wt/<id>`` worker fallback.
                 if project_obj is not None and workspace_kind == "worktree":
                     if project_repo and not workspace_path:
                         workspace_path = os.path.join(project_repo, ".worktrees", task_id)
                     if not branch_name:
                         branch_name = _project_branch_name(project_obj, task_id, title)
 
-                conn.execute(
+                inserted = conn.execute(
                     """
                     INSERT INTO tasks (
                         id, title, body, assignee, status, priority,
@@ -1292,8 +1267,9 @@ def create_task(
                         max_runtime_seconds,
                         skills, max_retries, model_override, provider_override,
                         reasoning_effort,
-                        goal_mode, goal_max_turns, session_id, completion_contract
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        goal_mode, goal_max_turns, session_id, completion_contract, isolation_policy
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(id) DO NOTHING
                     """,
                     (
                         task_id, title.strip(), body, assignee, task_status, priority,
@@ -1302,9 +1278,10 @@ def create_task(
                         _opt_int(max_runtime_seconds),
                         json.dumps(skills_list) if skills_list is not None else None,
                         _opt_int(max_retries), model_override, provider_override, reasoning_effort,
-                        1 if goal_mode else 0, _opt_int(goal_max_turns), session_id, completion_contract,
+                        1 if goal_mode else 0, _opt_int(goal_max_turns), session_id, effective_contract, effective_policy,
                     ),
                 )
+                validate_inserted_task(conn, inserted, task_id)
                 for pid in parents:
                     _link(conn, pid, task_id)
                 _append_event(
@@ -1327,31 +1304,13 @@ def create_task(
                         "provider_override": provider_override,
                     },
                 )
-                if task_status == "blocked":
-                    _append_event(
-                        conn,
-                        task_id,
-                        "blocked",
-                        {"reason": "initial_status", "status": "blocked", "actor": created_by or "user"},
-                    )
-                if task_status == "todo":
-                    # Parked behind an open parent: record why, exactly as
-                    # link_tasks does, so the board never shows an unexplained todo.
-                    gating = [p for p in parents if _task_status(conn, p) not in ("done", "archived")]
-                    if gating:
-                        _append_event(
-                            conn,
-                            task_id,
-                            "dependency_wait",
-                            {"reason": "parent_not_done", "parent": gating[0]},
-                        )
-                # ACK-edge: the originating channel hears a child BLOCK, not just the fan-in.
+                record_initial_state(conn, task_id, task_status, parents, created_by, _append_event, _task_status)
                 inherit_creator_origin(conn, task_id, creator_task_id, created_at=now)
                 _inherit_notify_subs(conn, task_id, parents, created_at=now)
-            return task_id
-        except sqlite3.IntegrityError:
+            return (task_id, True) if return_created else task_id
+        except TaskIdCollision:
             if attempt == 1:
-                raise
+                raise sqlite3.IntegrityError("UNIQUE constraint failed: tasks.id") from None
     raise RuntimeError("unreachable")
 
 
@@ -1580,15 +1539,17 @@ def link_tasks(
         if missing:
             raise ValueError(f"unknown task(s): {', '.join(missing)}")
         child = conn.execute(
-            "SELECT status, current_run_id FROM tasks WHERE id = ?", (child_id,),
+            "SELECT status, current_run_id, completion_contract, isolation_policy FROM tasks WHERE id = ?", (child_id,)
         ).fetchone()
+        if _would_cycle(conn, parent_id, child_id):
+            raise ValueError(f"linking {parent_id} -> {child_id} would create a cycle")
+        from hermes_cli.kanban_db_safety import propagate_link_restriction
+        propagate_link_restriction(conn, parent_id, child_id)
         if child["status"] == "running" and (
             expected_child_run_id is None
             or child["current_run_id"] != expected_child_run_id
         ):
             raise ValueError(f"cannot link {parent_id} -> {child_id}: child is already running")
-        if _would_cycle(conn, parent_id, child_id):
-            raise ValueError(f"linking {parent_id} -> {child_id} would create a cycle")
         _link(conn, parent_id, child_id)
         # If child was ready but parent is not yet terminal, demote child to todo
         # (archived counts as terminal, matching _parents_satisfied/recompute_ready).
@@ -2206,9 +2167,9 @@ def claim_task(
     lock = claimer or _claimer_id()
     expires = now + _resolve_claim_ttl_seconds(ttl_seconds)
     with write_txn(conn):
-        # Single enforcement point: never ready -> running with an undone
-        # parent, whichever writer set 'ready'. Demote to 'todo';
-        # recompute_ready re-promotes when the parents finish.
+        from hermes_cli.kanban_db_safety import reject_restricted_claim
+        if reject_restricted_claim(conn, task_id, _append_event):
+            return None
         if not _parents_satisfied(conn, task_id):
             conn.execute(
                 "UPDATE tasks SET status = 'todo' "
@@ -2239,6 +2200,9 @@ def claim_review_task(
     lock = claimer or _claimer_id()
     expires = now + _resolve_claim_ttl_seconds(ttl_seconds)
     with write_txn(conn):
+        from hermes_cli.kanban_db_safety import reject_restricted_claim
+        if reject_restricted_claim(conn, task_id, _append_event):
+            return None
         if not _parents_satisfied(conn, task_id):
             demoted = conn.execute(
                 "UPDATE tasks SET status = 'todo' "

@@ -21,7 +21,7 @@ DELEGATED_CHILD_ENV_MARKER = "HERMES_DELEGATED_CHILD_CONTEXT"
 
 KANBAN_ENV_KEYS: tuple[str, ...] = (
     "HERMES_KANBAN_TASK", "HERMES_KANBAN_RUN_ID", "HERMES_KANBAN_CLAIM_LOCK",
-    "HERMES_KANBAN_GOAL_MODE", "HERMES_KANBAN_GOAL_MAX_TURNS",
+    "HERMES_KANBAN_GOAL_MODE", "HERMES_KANBAN_GOAL_MAX_TURNS", "HERMES_KANBAN_EFFECTS",
 )
 
 
@@ -132,7 +132,12 @@ def scrub_kanban_env(env: Mapping[str, str] | MutableMapping[str, str]) -> dict[
     path-valued marker is kept (a grandchild that moved HERMES_HOME must not re-fence
     onto its scratch root and unfence the real one).
     """
+    effects = str(env.get("HERMES_KANBAN_EFFECTS") or "").strip()
     cleaned = {k: v for k, v in env.items() if k not in KANBAN_ENV_KEYS}
+    # Task identity is scrubbed for descendants, but the local-only effect
+    # policy is inherited deliberately so a child cannot regain external tools.
+    if effects:
+        cleaned["HERMES_KANBAN_EFFECTS"] = effects
     inherited = str(env.get(DELEGATED_CHILD_ENV_MARKER) or "")
     cleaned[DELEGATED_CHILD_ENV_MARKER] = inherited if inherited and inherited != "1" else _fenced_kanban_root()
     return cleaned

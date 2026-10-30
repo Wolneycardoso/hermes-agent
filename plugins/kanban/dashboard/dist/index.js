@@ -1003,10 +1003,24 @@
     }, [selectedIds, requestMoveConfirm, requestCompletionSummary, performMoveTask]);
 
     const createTask = useCallback(function (body) {
-      return SDK.fetchJSON(withBoard(`${API}/tasks`, board), {
+      const naturalMission = Boolean(body && body.triage);
+      const endpoint = naturalMission ? `${API}/intent` : `${API}/tasks`;
+      const payload = naturalMission
+        ? {
+            request: body.title,
+            assignee: body.assignee,
+            priority: body.priority,
+            workspace_kind: body.workspace_kind,
+            workspace_path: body.workspace_path,
+            skills: body.skills,
+            goal_mode: body.goal_mode,
+            goal_max_turns: body.goal_max_turns,
+          }
+        : body;
+      return SDK.fetchJSON(withBoard(endpoint, board), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
+        body: JSON.stringify(payload),
       }).then(function (res) {
         // Surface dispatcher-presence warnings (e.g. "no gateway is
         // running") via the existing error banner channel. Not fatal —
@@ -3223,6 +3237,11 @@
                   ),
                 }, t.warnings.highest_severity === "critical" ? "!!!" :
                    t.warnings.highest_severity === "error" ? "!!" : "⚠")
+              : null,
+            t.isolation_policy === "natural-local-only" || t.completion_contract === "local-only"
+              ? h(Badge, { variant: "outline", className: "hermes-kanban-tag",
+                           title: "Worker execution is blocked until an isolated backend is available." },
+                  tx(i18n, "isolationPending", "Execution blocked: isolation pending"))
               : null,
             t.priority > 0
               ? h(Badge, { className: "hermes-kanban-priority",

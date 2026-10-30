@@ -665,6 +665,78 @@ async def test_gateway_create_autosubscribes_on_explicit_board(kanban_home):
     finally:
         conn.close()
 
+@pytest.mark.asyncio
+async def test_gateway_natural_mission_autosubscribes(kanban_home):
+    """A free-form Discord /kanban request uses triage and the same chat subscription."""
+    from gateway.slash_commands import GatewaySlashCommandsMixin
+    from gateway.config import Platform
+
+    runner = object.__new__(GatewaySlashCommandsMixin)
+    runner._kanban_notifier_profile = "default"
+    runner._reply_metadata = lambda _event: None
+    runner._active_profile_name = lambda: "default"
+    source = SimpleNamespace(
+        platform=Platform.DISCORD,
+        chat_id="natural-chat",
+        chat_type="dm",
+        thread_id="natural-thread",
+        user_id="natural-user",
+    )
+    event = SimpleNamespace(
+        text="/kanban crie um cliente para acompanhar os Kanbans no wo-os.me",
+        source=source,
+        message_id="natural-message",
+        reply_to_message_id=None,
+    )
+
+    out = await GatewaySlashCommandsMixin._handle_kanban_command(runner, event)
+
+    assert "created mission" in out.lower()
+    assert "subscribed" in out.lower()
+    with kbc.connect() as conn:
+        tasks = kb.list_tasks(conn)
+        subs = kbn.list_notify_subs(conn)
+    assert len(tasks) == 1
+    assert tasks[0].status == "triage"
+    assert tasks[0].title == "um cliente para acompanhar os Kanbans no wo-os.me"
+    assert len(subs) == 1
+    assert subs[0]["chat_id"] == "natural-chat"
+
+
+@pytest.mark.asyncio
+async def test_gateway_show_output_cannot_trigger_auto_subscribe(kanban_home):
+    """A title containing a creation-like string is still a read command."""
+    from gateway.slash_commands import GatewaySlashCommandsMixin
+    from gateway.config import Platform
+
+    with kbc.connect() as conn:
+        task_id = kb.create_task(conn, title="Created t_deadbeef from user content")
+
+    runner = object.__new__(GatewaySlashCommandsMixin)
+    runner._kanban_notifier_profile = "default"
+    runner._reply_metadata = lambda _event: None
+    runner._active_profile_name = lambda: "default"
+    source = SimpleNamespace(
+        platform=Platform.DISCORD,
+        chat_id="show-chat",
+        chat_type="dm",
+        thread_id="show-thread",
+        user_id="show-user",
+    )
+    event = SimpleNamespace(
+        text=f"/kanban show {task_id}",
+        source=source,
+        message_id="show-message",
+        reply_to_message_id=None,
+    )
+
+    out = await GatewaySlashCommandsMixin._handle_kanban_command(runner, event)
+
+    assert "subscribed" not in out.lower()
+    with kbc.connect() as conn:
+        assert kbn.list_notify_subs(conn) == []
+
+
 @pytest.mark.parametrize(
     "chat_type,thread_id,thread_sessions_per_user",
     [

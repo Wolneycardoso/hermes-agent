@@ -58,7 +58,17 @@ class _TerminalSlot:
                 )
                 try:
                     self.guard_key = (ref.args["command"], config["env_type"], tt._docker_has_host_access(config))
-                    self.decision = tt._check_all_guards(*self.guard_key)
+                    local_only_error = tt.local_only_terminal_block(ref.args["command"])
+                    if local_only_error:
+                        self.decision = {
+                            "approved": False,
+                            "status": "blocked",
+                            "message": local_only_error,
+                            "description": "local-only effect gate",
+                            "command": ref.args["command"],
+                        }
+                    else:
+                        self.decision = tt._check_all_guards(*self.guard_key)
                 finally:
                     reset_current_observability_context(tokens)
         finally:

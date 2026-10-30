@@ -777,7 +777,7 @@ def _get_env_config() -> Dict[str, Any]:
         "docker_env": docker_env,
         "docker_run_as_host_user": _tenv_bool("TERMINAL_DOCKER_RUN_AS_HOST_USER", "false"),
         "docker_snap_compat": _tenv_bool("TERMINAL_DOCKER_SNAP_COMPAT", "false"),
-        "docker_network": _tenv_bool("TERMINAL_DOCKER_NETWORK", "true"),
+        "docker_network": _tenv_bool("TERMINAL_DOCKER_NETWORK", "true") and not _local_only_effects_active(),
         "docker_extra_args": docker_extra_args,
         "docker_shm_size": docker_shm_size,
         # Cross-process reuse: attach to a labeled container at startup
@@ -857,6 +857,7 @@ from tools.terminal_tool_guards import (
     _foreground_background_guidance, _safe_command_preview, _validate_workdir,
     gateway_lifecycle_block, self_repo_block,
 )
+from tools.kanban_effect_gate import local_only_active as _local_only_effects_active, local_only_terminal_block
 from tools.terminal_tool_background import _YIELDED_NOTE, spawn_background_process, yield_to_background_handler
 from tools.terminal_tool_result import finalize_foreground_result
 
@@ -1317,9 +1318,13 @@ def _pre_exec_block(
 ) -> None:
     """Raise :class:`_Rejected` with the blocked-result JSON when the command must not run.
 
-    Order matters: gateway lifecycle first (protects the running gateway),
-    then the dangerous-workdir check, then the self-repo guard (local only).
+    Order matters: local-only capability restriction first, then gateway
+    lifecycle, then the dangerous-workdir check, then the self-repo guard
+    (local only).
     """
+    local_only_error = local_only_terminal_block(command)
+    if local_only_error:
+        raise _Rejected(_error_json(local_only_error, status="blocked"))
     blocked = gateway_lifecycle_block(
         command=command, env=env, env_type=env_type, cwd=cwd, workdir=workdir, session_key=session_key,
     )
@@ -1406,6 +1411,13 @@ def terminal_tool(
     from hermes_cli.observability.shared_metrics_loop import record_terminal_backend as _metered
     plan = None
     try:
+        # Refuse local-only unsafe commands before environment acquisition or
+        # foreground/background lifecycle heuristics. This keeps a command from
+        # reaching any backend merely because an earlier generic guard (for
+        # example, the long-lived-server hint) returned first.
+        local_only_error = local_only_terminal_block(command)
+        if local_only_error:
+            return _error_json(local_only_error, status="blocked")
         plan = _plan_execution(
             command, task_id=task_id, timeout=timeout, background=background, _host_local=_host_local,
         )

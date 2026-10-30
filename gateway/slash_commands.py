@@ -363,10 +363,30 @@ class GatewaySlashCommandsMixin(
         except Exception as exc:  # pragma: no cover - defensive
             return t("gateway.kanban.error_prefix", error=exc)
 
-        # Auto-subscribe on create, parsing the task id from the CLI's standard success line
-        # ("Created t_abcd  (ready, ...)"). With --json there is no such line, so a scripting user
-        # gets no subscription and can call /kanban notify-subscribe explicitly.
-        m = re.search(r"Created\s+(t_[0-9a-f]+)\b", output) if action == "create" and output else None
+        # Auto-subscribe on task creation, parsing the task id from the CLI's standard success line
+        # ("Created t_abcd  (ready, ...)") or the natural mission line
+        # ("Created mission t_abcd ..."). With --json there is no such line,
+        # so a scripting user can call /kanban notify-subscribe explicitly.
+        # Only creation verbs may trigger subscription. Natural free-form
+        # phrases use an unknown first word and are still creation requests;
+        # known read/update verbs must never be inferred from their output.
+        _non_create_actions = {
+            "init", "boards", "board", "show", "current", "list", "ls", "status", "help",
+            "rm", "remove", "delete", "switch", "use", "rename", "export", "import",
+            "swarm", "assign", "set-model", "reclaim", "reassign", "diagnostics", "diag",
+            "link", "unlink", "claim", "comment", "attach", "attachments", "attach-rm",
+            "complete", "done", "edit", "block", "schedule", "unblock", "request-review",
+            "request-changes", "reopen-review", "promote", "archive", "tail", "dispatch", "daemon",
+            "watch", "stats", "notify-subscribe", "notify-unsubscribe", "notify-list", "subscribe",
+            "unsubscribe", "log", "runs", "heartbeat", "assignees", "context", "specify", "decompose",
+            "gc", "repair", "cancel", "start", "run", "review",
+        }
+        creation_action = (action or "").strip().lower()
+        eligible_for_subscription = creation_action not in _non_create_actions
+        m = re.search(
+            r"(?:Created|Already exists)(?:\s+mission)?\s+(t_[0-9a-f]+)\b",
+            output,
+        ) if output and eligible_for_subscription else None
         if m:
             task_id = m.group(1)
             try:

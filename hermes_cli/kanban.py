@@ -206,7 +206,7 @@ def _profile_author() -> str:
 
 
 _DELEGATED_CHILD_DENIED_ACTIONS: frozenset[str] = frozenset({
-    "init", "create", "swarm", "assign", "reclaim", "reassign", "link", "unlink",
+    "init", "create", "crie", "pedir", "request", "intent", "swarm", "assign", "reclaim", "reassign", "link", "unlink",
     "claim", "comment", "attach", "attach-rm", "complete", "edit", "block",
     "schedule", "unblock", "promote", "archive", "dispatch", "daemon", "repair",
     "heartbeat", "notify-subscribe", "notify-unsubscribe", "specify", "decompose",
@@ -335,6 +335,37 @@ def _cmd_assignees(args: argparse.Namespace) -> int:
 def _cmd_create(args: argparse.Namespace) -> int:
     from agent.delegation_context import is_dispatcher_owned_worker_context
 
+    title_words = list(args.title) if isinstance(args.title, (list, tuple)) else [args.title]
+    if (
+        getattr(args, "kanban_action", None) == "crie"
+        and len(title_words) > 1
+        and not any((getattr(args, name, None) is not None) for name in ("body", "body_file", "branch", "project"))
+        and not getattr(args, "parent", None)
+        and not getattr(args, "triage", False)
+        and getattr(args, "initial_status", "running") == "running"
+        and not getattr(args, "completion_contract", None)
+    ):
+        return _cmd_intent(argparse.Namespace(
+            request=title_words,
+            assignee=getattr(args, "assignee", None),
+            workspace=getattr(args, "workspace", None),
+            branch=None,
+            project=None,
+            tenant=getattr(args, "tenant", None),
+            priority=getattr(args, "priority", 0),
+            skills=getattr(args, "skills", None),
+            max_runtime=getattr(args, "max_runtime", None),
+            max_retries=getattr(args, "max_retries", None),
+            model_override=getattr(args, "model_override", None),
+            provider_override=getattr(args, "provider_override", None),
+            goal_mode=getattr(args, "goal_mode", False),
+            goal_max_turns=getattr(args, "goal_max_turns", None),
+            idempotency_key=getattr(args, "idempotency_key", None),
+            created_by=getattr(args, "created_by", None),
+            preview=False,
+            json=getattr(args, "json", False),
+        ))
+    title = " ".join(title_words).strip()
     body = args.body
     body_file = getattr(args, "body_file", None)
     if body is not None and body_file is not None:
@@ -362,7 +393,7 @@ def _cmd_create(args: argparse.Namespace) -> int:
                     "use 1 to trip on the first failure.", 2)
     with kbc.connect_closing() as conn:
         task_id = kb.create_task(
-            conn, title=args.title, body=body, assignee=args.assignee,
+            conn, title=title, body=body, assignee=args.assignee,
             created_by=args.created_by or _profile_author(),
             workspace_kind=ws_kind, workspace_path=ws_path, branch_name=branch_name,
             project_id=getattr(args, "project", None), tenant=args.tenant, priority=args.priority,
@@ -389,6 +420,94 @@ def _cmd_create(args: argparse.Namespace) -> int:
             running, message = _check_dispatcher_presence()
             if not running and message:
                 print(f"\n⚠  {message}", file=sys.stderr)
+    return 0
+
+
+def _cmd_intent(args: argparse.Namespace) -> int:
+    """Persist one natural-language request as a triage mission."""
+    from hermes_cli import kanban_intent
+
+    request = _joined_words(args.request)
+    if not request:
+        return _err("kanban pedir: a natural-language request is required", 2)
+    try:
+        ws_kind, ws_path = _parse_workspace_flag(getattr(args, "workspace", None))
+        branch_name = _parse_branch_flag(getattr(args, "branch", None))
+        max_runtime = _parse_duration(getattr(args, "max_runtime", None))
+    except argparse.ArgumentTypeError as exc:
+        return _err(f"kanban pedir: {exc}", 2)
+    except ValueError as exc:
+        return _err(f"kanban pedir: --max-runtime: {exc}", 2)
+    if branch_name and ws_kind != "worktree":
+        return _err("kanban pedir: --branch is only valid with --workspace worktree", 2)
+    max_retries = getattr(args, "max_retries", None)
+    if max_retries is not None and max_retries < 1:
+        return _err("kanban pedir: --max-retries must be >= 1", 2)
+
+    try:
+        spec = kanban_intent.prepare_mission(
+            request,
+            board=kb.get_current_board(),
+            idempotency_key=getattr(args, "idempotency_key", None),
+        )
+    except ValueError as exc:
+        return _err(f"kanban pedir: {exc}", 2)
+
+    if getattr(args, "preview", False):
+        payload = {
+            "preview": True,
+            "title": spec.title,
+            "body": spec.body,
+            "idempotency_key": spec.idempotency_key,
+            "triage": True,
+            "decomposition_status": "not_confirmed",
+            "execution_status": "blocked_pending_isolation",
+        }
+        if getattr(args, "json", False):
+            _print_json(payload)
+        else:
+            print(f"Preview: {spec.title}\n"
+                  f"status=triage, idempotency_key={spec.idempotency_key}; "
+                  "decomposition may run later if enabled; execution blocked pending isolation")
+        return 0
+
+    with kbc.connect_closing() as conn:
+        task, created, spec = kanban_intent.create_mission(
+            conn,
+            request,
+            board=kb.get_current_board(),
+            assignee=getattr(args, "assignee", None),
+            created_by=getattr(args, "created_by", None) or _profile_author(),
+            workspace_kind=ws_kind,
+            workspace_path=ws_path,
+            branch_name=branch_name,
+            project_id=getattr(args, "project", None),
+            tenant=getattr(args, "tenant", None),
+            priority=getattr(args, "priority", 0),
+            skills=getattr(args, "skills", None) or None,
+            max_retries=max_retries,
+            max_runtime_seconds=max_runtime,
+            model_override=getattr(args, "model_override", None),
+            provider_override=getattr(args, "provider_override", None),
+            goal_mode=bool(getattr(args, "goal_mode", False)),
+            goal_max_turns=getattr(args, "goal_max_turns", None),
+            idempotency_key=getattr(args, "idempotency_key", None),
+        )
+    payload = {
+        "created": created,
+        "task": _task_to_dict(task),
+        "parent_task_id": task.id,
+        "decomposition_status": "not_confirmed",
+        "execution_status": "blocked_pending_isolation",
+        "blocked_external_effects": True,
+        "idempotency_key": spec.idempotency_key,
+    }
+    if getattr(args, "json", False):
+        _print_json(payload)
+    else:
+        verb = "Created" if created else "Already exists"
+        print(f"{verb} mission {task.id}  (status={task.status}, assignee={task.assignee or '-'})\n"
+              "Decomposition may run later if enabled; execution blocked pending isolated worker.")
     return 0
 
 
@@ -1318,7 +1437,9 @@ def _cmd_decompose(args: argparse.Namespace) -> int:
 
 
 _HANDLERS = {
-    "init": _cmd_init, "create": _cmd_create, "crie": _cmd_create, "swarm": _cmd_swarm,
+    "init": _cmd_init, "create": _cmd_create, "crie": _cmd_create,
+    "pedir": _cmd_intent, "request": _cmd_intent, "intent": _cmd_intent,
+    "swarm": _cmd_swarm,
     "list": _cmd_list, "ls": _cmd_list, "show": _cmd_show,
     "assign": _cmd_assign, "set-model": _cmd_set_model,
     "reclaim": _cmd_reclaim, "reassign": _cmd_reassign,
@@ -1350,6 +1471,8 @@ Common subcommands:
   `show <id>`           Task details + comments + events
   `stats`               Per-status / per-assignee counts
   `create <title>…`     Create a task (alias `crie`; auto-subscribes you to events)
+  `pedir <frase>…`      Create a triaged mission; dispatcher decomposes it automatically
+  `<frase livre>`       The same natural mission path, without a subcommand
   `comment <id> <msg>`  Append a comment
   `attach <id> <path>`  Attach a local file; `attachments <id>` to list
   `complete <id>…`      Mark task(s) done
@@ -1367,6 +1490,49 @@ Read-only commands are safe while an agent is running.\
 """
 
 
+def _rewrite_natural_slash_tokens(
+    tokens: list[str], *, preserve_legacy_create: bool = False
+) -> list[str]:
+    """Route a free-form slash request through the canonical ``pedir`` action.
+
+    ``create`` remains the structured command. Portuguese ``crie`` keeps its
+    legacy alias when it has a single title or explicit create flags; a longer
+    unquoted phrase becomes a triage mission for chat ergonomics.
+    """
+    if not tokens:
+        return tokens
+    prefix: list[str] = []
+    body = list(tokens)
+    if len(body) >= 2 and body[0] == "--board":
+        prefix = body[:2]
+        body = body[2:]
+    elif body and body[0].startswith("--board="):
+        prefix = body[:1]
+        body = body[1:]
+    if not body:
+        return tokens
+    action = body[0].lower()
+    if action in {"pedir", "request", "intent"}:
+        return prefix + body
+    if action == "crie":
+        if preserve_legacy_create:
+            return tokens
+        structured_flags = {
+            "--body", "--body-file", "--parent", "--branch", "--project",
+            "--triage", "--initial-status", "--completion-contract",
+        }
+        has_structured_flag = any(
+            token.split("=", 1)[0] in structured_flags for token in body[1:]
+        )
+        if len(body) > 2 and not has_structured_flag:
+            return prefix + ["pedir", *body[1:]]
+        return tokens
+    known = set(_HANDLERS) | {"boards"}
+    if action not in known:
+        return prefix + ["pedir", *body]
+    return tokens
+
+
 def run_slash(rest: str) -> str:
     """Execute a ``/kanban …`` string (``rest`` = everything after ``/kanban``) and return captured
     stdout/stderr. Shared by the interactive CLI and the gateway so formatting is identical."""
@@ -1381,6 +1547,15 @@ def run_slash(rest: str) -> str:
             if len(tok) >= 2 and tok[0] == tok[-1] and tok[0] in ("'", '"'):
                 tok = tok[1:-1]
             tokens.append(tok)
+    raw_mode = rest.lstrip()
+    if raw_mode.startswith("--board"):
+        raw_parts = raw_mode.split(None, 2)
+        if len(raw_parts) >= 3:
+            raw_mode = raw_parts[2]
+    preserve_legacy_create = raw_mode.lower().startswith(('crie "', "crie '",))
+    tokens = _rewrite_natural_slash_tokens(
+        tokens, preserve_legacy_create=preserve_legacy_create
+    )
 
     # Bare ``/kanban`` or ``/kanban help`` / ``--help`` / ``-h`` / ``?``:
     # show the curated short-help block instead of dumping argparse's full

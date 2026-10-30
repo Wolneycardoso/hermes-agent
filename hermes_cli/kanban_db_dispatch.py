@@ -20,11 +20,11 @@ from dataclasses import field
 from pathlib import Path
 from typing import Any
 from typing import Callable
-from typing import Iterable
 from typing import Mapping
 from typing import Optional
 from typing import TYPE_CHECKING
 
+from hermes_cli.kanban_db_dispatch_helpers import describe_suppression, skip_restricted_dispatch
 from hermes_cli.quiet_single_query import KANBAN_WORKER_EXIT_TRAILER
 
 if TYPE_CHECKING:
@@ -125,6 +125,8 @@ class DispatchResult:
     Code terminal like ``orion-cc``), not a Hermes profile. Expected steady-state
     on multi-lane setups, NOT operator-actionable; tracked apart so health
     telemetry can tell "stuck" from "correctly idle"."""
+    skipped_local_only: list[str] = field(default_factory=list)
+    """Task ids refused before claim because no isolated worker backend exists."""
     skipped_per_profile_capped: list[tuple[str, str, int]] = field(default_factory=list)
     """``(task_id, assignee, current_running_count)`` deferred because the
     assignee is at ``kanban.max_in_progress_per_profile``. Picked up on a later
@@ -152,35 +154,6 @@ class DispatchResult:
     """Memory pressure that restricted this tick: ``"critical"`` (no new
     workers), ``"elevated"`` (at most one), ``None`` (no restriction).
     Reclaim/promotion bookkeeping still ran; deferred tasks stay queued."""
-
-
-def describe_suppression(results: Iterable[Optional["DispatchResult"]]) -> str:
-    """One line naming why the tick(s) held ready work back, or ``""``.
-
-    ``active_pr=1, recent_success=2, rate_limited=1, skipped_locked=1,
-    memory_pressure=critical`` — the respawn-guard reasons counted per task
-    plus the tick-level holds. Feeds the "dispatcher stuck" warnings of the
-    CLI daemon and the embedded gateway dispatcher, which otherwise report a
-    bare zero-spawn count while ``hermes kanban tail`` is the only place the
-    guard reason is written (#111910).
-    """
-    counts: dict[str, int] = {}
-    pressure: Optional[str] = None
-    for res in results:
-        if res is None:
-            continue
-        for _task_id, reason in res.respawn_guarded:
-            counts[reason] = counts.get(reason, 0) + 1
-        if res.rate_limited:
-            counts["rate_limited"] = counts.get("rate_limited", 0) + len(res.rate_limited)
-        if res.skipped_locked:
-            counts["skipped_locked"] = counts.get("skipped_locked", 0) + 1
-        if res.memory_pressure:
-            pressure = res.memory_pressure
-    parts = [f"{k}={v}" for k, v in sorted(counts.items())]
-    if pressure:
-        parts.append(f"memory_pressure={pressure}")
-    return ", ".join(parts)
 
 
 # Bounded registry of recently-reaped worker exits, filled by the reap loop in
@@ -1764,7 +1737,9 @@ def dispatch_profile_allowlist_summary() -> str:
 def _has_spawnable(conn: sqlite3.Connection, status: str) -> bool:
     rows = conn.execute(
         "SELECT DISTINCT assignee FROM tasks "
-        "WHERE status = ? AND assignee IS NOT NULL AND claim_lock IS NULL",
+        "WHERE status = ? AND assignee IS NOT NULL AND claim_lock IS NULL "
+        "AND COALESCE(completion_contract, '') != 'local-only' "
+        "AND COALESCE(isolation_policy, '') != 'natural-local-only'",
         (status,),
     ).fetchall()
     if not rows:
@@ -2042,6 +2017,10 @@ def _dispatch_lane_task(
     skip is recorded on ``result``.
     """
     task_id = row["id"]
+    # A local-only contract cannot be made safe by restricting tools inside a
+    # host worker. Refuse before admission, claim, workspace setup, or spawn.
+    if skip_restricted_dispatch(conn, row, result, dry_run, _kb):
+        return False
     # Non-profile assignees (control-plane lanes that pull via ``claim_task``)
     # would fail ``hermes -p <assignee>`` at startup and loop ready→crash→ready
     # forever. Bucketed apart from skipped_unassigned: the operator cannot fix
@@ -2269,7 +2248,7 @@ def _tick_spawn_budget(
 def _lane_rows(conn: sqlite3.Connection, status: str) -> list[sqlite3.Row]:
     """Unclaimed rows of one lane in dispatch order."""
     return conn.execute(
-        "SELECT id, assignee FROM tasks "
+        "SELECT id, assignee, completion_contract, isolation_policy FROM tasks "
         f"WHERE status = '{status}' AND claim_lock IS NULL "
         "ORDER BY priority DESC, created_at ASC"
     ).fetchall()
@@ -2297,6 +2276,8 @@ def _any_spawnable_review(
     for row in review_rows:
         assignee = row["assignee"]
         if not assignee:
+            continue
+        if row["completion_contract"] == "local-only" or row["isolation_policy"] == "natural-local-only":
             continue
         if profile_exists is not None and not profile_exists(assignee):
             continue
@@ -2837,6 +2818,8 @@ def _default_spawn(task: Task, workspace: str, *, board: Optional[str] = None) -
     ``HERMES_KANBAN_DB`` / ``HERMES_KANBAN_BOARD`` / workspaces_root to the
     board the task was claimed from, so workers cannot see other boards.
     """
+    if task.completion_contract == "local-only" or task.isolation_policy == "natural-local-only":
+        raise RuntimeError("isolated worker backend unavailable; refusing host spawn")
     if not task.assignee:
         raise ValueError(f"task {task.id} has no assignee")
 
@@ -2915,6 +2898,13 @@ def _default_spawn(task: Task, workspace: str, *, board: Optional[str] = None) -
         env["HERMES_KANBAN_GOAL_MODE"] = "1"
         if task.goal_max_turns is not None:
             env["HERMES_KANBAN_GOAL_MAX_TURNS"] = str(int(task.goal_max_turns))
+    # Natural-language missions declare a local-only completion contract. Keep
+    # the policy in the worker environment so every tool boundary can enforce it
+    # and delegated descendants inherit the same restriction.
+    if task.completion_contract == "local-only":
+        env["HERMES_KANBAN_EFFECTS"] = "blocked"
+    else:
+        env.pop("HERMES_KANBAN_EFFECTS", None)
     for var in ("TERMINAL_TIMEOUT", "TERMINAL_MAX_FOREGROUND_TIMEOUT"):
         override = _worker_terminal_timeout_env(task.max_runtime_seconds, env.get(var))
         if override is not None:
