@@ -87,4 +87,5 @@ jobs:
       # not an empty run, because an empty run reports green after it checks
       # nothing.
       - name: Run all workspace checks
-        run: node .github/scripts/run-workspace-checks.mjs
+        # Keep nested vitest/tsc/eslint worker pools within the standard runner.
+        run: node .github/scripts/run-workspace-checks.mjs --concurrency 2
